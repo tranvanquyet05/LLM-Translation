@@ -7,8 +7,8 @@ class NLLBTranslator:
     def __init__(self, model_name="facebook/nllb-200-3.3B", device="cuda"):
         print(f"Loading {model_name} on {device}...")
         self.device = device
-        # Load ở dạng float16 để fit dễ dàng vào 16GB VRAM (cần khoảng 6.6GB)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        # Ép dùng Tokenizer chậm (Slow Tokenizer) của NLLB để tránh lỗi của FastTokenizer trên Kaggle
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(
             model_name,
             torch_dtype=torch.float16,
@@ -27,11 +27,8 @@ class NLLBTranslator:
         self.tokenizer.src_lang = src_code
         inputs = self.tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=1024).to(self.device)
         
-        # Sửa lỗi: Một số bản Transformers (Fast tokenizer) không có lang_code_to_id.
-        if hasattr(self.tokenizer, "lang_code_to_id"):
-            forced_bos_token_id = self.tokenizer.lang_code_to_id[tgt_code]
-        else:
-            forced_bos_token_id = self.tokenizer.convert_tokens_to_ids(tgt_code)
+        # Phương pháp an toàn 100% để lấy token ID của ngôn ngữ đích
+        forced_bos_token_id = self.tokenizer.convert_tokens_to_ids(tgt_code)
         
         with torch.no_grad():
             generated_tokens = self.model.generate(

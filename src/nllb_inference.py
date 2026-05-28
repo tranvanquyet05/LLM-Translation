@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 from src.lang_map import get_nllb_code
 
 class NLLBTranslator:
-    def __init__(self, model_name="facebook/nllb-200-3.3B", device="cuda"):
+    def __init__(self, model_name="facebook/nllb-200-3.3B", device="cpu"):
         print(f"Loading {model_name} on {device}...")
         self.device = device
         # Ép dùng Tokenizer chậm (Slow Tokenizer) của NLLB để tránh lỗi của FastTokenizer trên Kaggle

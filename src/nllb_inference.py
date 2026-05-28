@@ -27,7 +27,11 @@ class NLLBTranslator:
         self.tokenizer.src_lang = src_code
         inputs = self.tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=1024).to(self.device)
         
-        forced_bos_token_id = self.tokenizer.lang_code_to_id[tgt_code]
+        # Sửa lỗi: Một số bản Transformers (Fast tokenizer) không có lang_code_to_id.
+        if hasattr(self.tokenizer, "lang_code_to_id"):
+            forced_bos_token_id = self.tokenizer.lang_code_to_id[tgt_code]
+        else:
+            forced_bos_token_id = self.tokenizer.convert_tokens_to_ids(tgt_code)
         
         with torch.no_grad():
             generated_tokens = self.model.generate(

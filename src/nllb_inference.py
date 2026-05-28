@@ -11,7 +11,8 @@ class NLLBTranslator:
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(
             model_name,
-            torch_dtype=torch.float16,
+            # Bỏ torch_dtype=torch.float16 chuyển sang float32 mặc định.
+            # Lý do: P100 architecture không hỗ trợ native FP16 Tensor Cores, gây ra lỗi "no kernel image is available".
             low_cpu_mem_usage=True
         ).to(device)
         print("Model loaded successfully!")

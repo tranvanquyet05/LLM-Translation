@@ -12,7 +12,7 @@ class NLLBTranslator:
         self.tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-3.3B", use_fast=False)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(
             model_name,
-            gguf_file="nllb-200-3.3b.f16.gguf", # Tên file GGUF trong repo
+            gguf_file="nllb-200-3.3B-f16.gguf", # Tên file GGUF chính xác trong repo
             device_map="auto" # Tự động nhét lên GPU (cuda)
         )
         print("Model loaded successfully!")

@@ -4,102 +4,146 @@ from bs4 import BeautifulSoup
 import re
 
 class GemmaTranslator:
-    def __init__(self, model_name="kaitchup/translategemma-4b-it-NVFP4", device="cuda"):
-        print(f"Loading {model_name} on {device}...")
+    def __init__(self, model_name="google/translategemma-4b-it", device="cuda", quantization="fp16"):
+        """
+        Khởi tạo translator cho TranslateGemma.
+        quantization có các giá trị:
+        - "fp16": Chạy ở dạng half-precision FP16 (Khuyên dùng cho T4x2 vì model 4B chiếm ~8.6GB VRAM, chạy nhanh nhất và chất lượng tốt nhất).
+        - "bf16": Chạy ở dạng BF16 (nếu GPU hỗ trợ).
+        - "4bit": Chạy ở dạng 4-bit NF4 qua bitsandbytes để tiết kiệm VRAM tối đa (~3-4GB).
+        - "none": Load model gốc không quantize (FP32).
+        """
+        print(f"Loading {model_name} on {device} (quantization: {quantization})...")
         self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         
-        # NVFP4 usually requires special loading, but we can fall back to standard BitsAndBytes if needed
-        # kaitchup's NVFP4 models might require bitsandbytes / accelerate.
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            device_map="auto",
-            torch_dtype=torch.float16
-        )
+        if quantization == "4bit":
+            from transformers import BitsAndBytesConfig
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True
+            )
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                quantization_config=bnb_config,
+                device_map="auto",
+                attn_implementation="sdpa"
+            )
+        elif quantization == "8bit":
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                load_in_8bit=True,
+                device_map="auto",
+                attn_implementation="sdpa"
+            )
+        else:
+            # Native FP16 / BF16
+            if quantization == "bf16" and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+                dtype = torch.bfloat16
+            else:
+                dtype = torch.float16
+                
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=dtype,
+                device_map="auto",
+                attn_implementation="sdpa"
+            )
+            
         print("Model loaded successfully!")
-
-    def _convert_lang_name(self, lang_code):
-        """Map language code to language name for the prompt."""
-        lang_map = {
-            "en": "English",
-            "vi": "Vietnamese",
-            "ko": "Korean",
-            "zh": "Chinese",
-            "fr": "French",
-            "de": "German",
-            "ja": "Japanese",
-            "es": "Spanish",
-            "ru": "Russian",
-            "th": "Thai",
-            # Add more mappings as needed based on your dataset
-        }
-        # Fallback to uppercase code if not found in map
-        return lang_map.get(lang_code, lang_code.upper())
+        self._warmup()
 
     def _format_prompt(self, text, src_lang, tgt_lang):
-        src_name = self._convert_lang_name(src_lang)
-        tgt_name = self._convert_lang_name(tgt_lang)
-        
-        # Prompt được tinh chỉnh tỉ mỉ dựa trên yêu cầu từ file log benchmark:
-        # Bắt buộc dịch chính xác, giữ nguyên số (digit_preservation), 
-        # HTML tags, format và dịch đúng ngôn ngữ đích mà không paraphrase bừa bãi.
-        prompt = (
-            f"<bos><start_of_turn>user\n"
-            f"You are a highly capable AI translation assistant focusing on enterprise-grade accuracy.\n"
-            f"Your task is to translate the following text from {src_name} ({src_lang}) to {tgt_name} ({tgt_lang}).\n"
-            f"CRITICAL REQUIREMENTS:\n"
-            f"1. Accurately convey the meaning and nuances of the original text.\n"
-            f"2. Preserve all numbers, dates, and currencies exactly as they appear.\n"
-            f"3. Preserve all original formatting, special characters, and HTML/XML structures completely intact.\n"
-            f"4. For mixed-language inputs (e.g., source contains some English words), translate the main language and keep the technical terms as appropriate.\n"
-            f"5. Produce ONLY the {tgt_name} translation. Do not add any conversational text, explanations, notes, or markdown formatting.\n\n"
-            f"Source text:\n{text}<end_of_turn>\n"
-            f"<start_of_turn>model\n"
+        """
+        Sử dụng định dạng structured chat template chính thức của TranslateGemma.
+        """
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "source_lang_code": src_lang,
+                        "target_lang_code": tgt_lang,
+                        "text": text
+                    }
+                ]
+            }
+        ]
+        return self.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
         )
-        return prompt
 
     def translate_batch(self, texts, src_lang, tgt_lang):
-        """Basic translation for a list of texts."""
+        """
+        Dịch đồng thời một danh sách văn bản sử dụng GPU batching để tối ưu hiệu năng.
+        """
         if not texts:
             return []
             
-        translated_texts = []
-        for text in texts:
-            prompt = self._format_prompt(text, src_lang, tgt_lang)
+        # Xử lý làm sạch mã ngôn ngữ dựa vào C:\Users\tvquyet\Code\LLM_Translation\data\test.json
+        src_lang = src_lang.lower().strip()
+        tgt_lang = tgt_lang.lower().strip()
+
+        # Nếu chỉ có 1 câu, dịch tuần tự nhanh
+        if len(texts) == 1:
+            prompt = self._format_prompt(texts[0], src_lang, tgt_lang)
             inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
-            
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=1024,
-                    do_sample=False,             # Beam cực ngặt để độ chính xác doanh nghiệp (deterministic)
-                    num_beams=3,                 # Dùng Beam Search = 3 để văn phong dịch mượt và đúng ngữ cảnh hơn
-                    repetition_penalty=1.1,      # Phạt lặp từ nhẹ để không bao giờ bị dính lỗi lặp "Tr Tr Tr..."
-                    early_stopping=True
+                    max_new_tokens=512,
+                    do_sample=False,
+                    num_beams=1,
+                    repetition_penalty=1.05
                 )
-                
-            # Extract the generated portion (after the prompt)
             input_length = inputs.input_ids.shape[1]
             generated_tokens = outputs[0][input_length:]
+            return [self.tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()]
+
+        # Dịch song song (Batching)
+        prompts = [self._format_prompt(t, src_lang, tgt_lang) for t in texts]
+        
+        # Cấu hình padding bên trái cho generator của CausalLM
+        self.tokenizer.padding_side = "left"
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
             
-            translated_text = self.tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
-            translated_texts.append(translated_text)
+        inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.device)
+        
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=512,
+                do_sample=False,
+                num_beams=1,
+                repetition_penalty=1.05
+            )
+            
+        translated_texts = []
+        for i, out in enumerate(outputs):
+            input_len = inputs.input_ids[i].shape[0]
+            gen_tokens = out[input_len:]
+            decoded = self.tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
+            translated_texts.append(decoded)
             
         return translated_texts
 
     def translate_html_safe(self, html_text, src_lang, tgt_lang):
         """
-        Duyệt cây DOM, nhặt đúng Text đi dịch rồi nhét lại vào HTML.
-        Đảm bảo tag HTML, XML không bao giờ bị phá hỏng.
+        Duyệt cây DOM, gom các Node text có nghĩa đi dịch theo lô (batching) và chèn lại vào HTML.
+        Bảo toàn tags HTML hoàn hảo và tối ưu hóa thời gian thực thi.
         """
         soup = BeautifulSoup(html_text, 'html.parser')
         nodes_to_translate = []
         
-        # Chỉ lấy text có nghĩa, bỏ qua khoảng trắng hoặc tags chức năng
+        # Chỉ lấy text có nghĩa, bỏ qua tags chức năng
         for node in soup.find_all(string=True):
             if node.parent.name not in ['style', 'script', 'head', 'title', 'meta', '[document]']:
                 text_strip = node.strip()
-                # Skip nếu chỉ là số hoặc ký tự đặc biệt (tiết kiệm thời gian dịch)
+                # Bỏ qua các text chỉ chứa số hoặc ký tự đặc biệt
                 if text_strip and any(c.isalpha() for c in text_strip):
                     nodes_to_translate.append((node, text_strip))
         
@@ -110,21 +154,30 @@ class GemmaTranslator:
         translated_texts = self.translate_batch(texts, src_lang, tgt_lang)
         
         for (node, orig_text), trans_text in zip(nodes_to_translate, translated_texts):
-             # Chỉ thay thế phần text có nghĩa, bảo toàn dấu cách thừa xung quanh Node
-             # Do escape HTML có thể gặp vấn đề, string replace có giới hạn
              new_string = node.replace(orig_text, trans_text)
              node.replace_with(new_string)
              
         return str(soup)
 
     def translate(self, source, src_lang, tgt_lang, kind="plain"):
-        """Hàm API gọi dịch chính."""
-        # 1. Early-return: Không paraphrase nếu source == target
+        """
+        API dịch chính cho TranslateGemma.
+        """
         if src_lang == tgt_lang:
             return source
 
-        # 2. Xử lý tùy theo plain text hay HTML
         if kind == "html" or ("<" in source and ">" in source):
             return self.translate_html_safe(source, src_lang, tgt_lang)
         else:
             return self.translate_batch([source], src_lang, tgt_lang)[0]
+
+    def _warmup(self):
+        """
+        Khởi tạo CUDA kernels và chạy thử trước 1 lượt để tránh bị trễ ở lượt chạy thật đầu tiên.
+        """
+        print("Warming up CUDA kernels...")
+        dummy_prompt = self._format_prompt("Hello", "en", "vi")
+        dummy_input = self.tokenizer(dummy_prompt, return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            _ = self.model.generate(**dummy_input, max_new_tokens=5)
+        print("Warm-up done!")

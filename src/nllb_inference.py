@@ -4,17 +4,17 @@ from bs4 import BeautifulSoup
 from src.lang_map import get_nllb_code
 
 class NLLBTranslator:
-    def __init__(self, model_name="facebook/nllb-200-3.3B", device="cpu"):
+    def __init__(self, model_name="keisuke-miyako/nllb-200-3.3B-gguf-f16", device="cuda"):
         print(f"Loading {model_name} on {device}...")
         self.device = device
-        # Ép dùng Tokenizer chậm (Slow Tokenizer) của NLLB để tránh lỗi của FastTokenizer trên Kaggle
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
+        # Dùng gguf_file theo chuẩn hỗ trợ mới của transformers để load file GGUF
+        # Tokenizer vẫn dùng từ repo gốc facebook/nllb-200-3.3B vì các model GGUF thường chỉ chứa weights
+        self.tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-3.3B", use_fast=False)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(
             model_name,
-            # Bỏ torch_dtype=torch.float16 chuyển sang float32 mặc định.
-            # Lý do: P100 architecture không hỗ trợ native FP16 Tensor Cores, gây ra lỗi "no kernel image is available".
-            low_cpu_mem_usage=True
-        ).to(device)
+            gguf_file="nllb-200-3.3b.f16.gguf", # Tên file GGUF trong repo
+            device_map="auto" # Tự động nhét lên GPU (cuda)
+        )
         print("Model loaded successfully!")
 
     def translate_batch(self, texts, src_lang, tgt_lang):

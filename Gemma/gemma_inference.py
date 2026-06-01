@@ -22,7 +22,7 @@ class GemmaTranslator:
             bnb_config = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_compute_dtype=torch.bfloat16, # Sử dụng bfloat16 để tránh lỗi tràn số (overflow/NaN)
                 bnb_4bit_use_double_quant=True
             )
             self.model = AutoModelForCausalLM.from_pretrained(
@@ -40,10 +40,10 @@ class GemmaTranslator:
             )
         else:
             # Native FP16 / BF16
-            if quantization == "bf16" and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
-                dtype = torch.bfloat16
-            else:
-                dtype = torch.float16
+            # CHÚ Ý QUAN TRỌNG: Các dòng Gemma rất không ổn định ở dạng float16 và dễ bị lỗi tràn số (NaN),
+            # dẫn đến lỗi 'CUDA error: device-side assert triggered'. 
+            # Bắt buộc phải sử dụng bfloat16 để đảm bảo tính ổn định số học.
+            dtype = torch.bfloat16
                 
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,

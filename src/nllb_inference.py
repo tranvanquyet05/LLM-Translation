@@ -4,16 +4,15 @@ from bs4 import BeautifulSoup
 from src.lang_map import get_nllb_code
 
 class NLLBTranslator:
-    def __init__(self, model_name="keisuke-miyako/nllb-200-3.3B-gguf-f16", device="cuda"):
+    def __init__(self, model_name="facebook/nllb-200-3.3B", device="cuda"):
         print(f"Loading {model_name} on {device}...")
         self.device = device
-        # Dùng gguf_file theo chuẩn hỗ trợ mới của transformers để load file GGUF
-        # Tokenizer vẫn dùng từ repo gốc facebook/nllb-200-3.3B vì các model GGUF thường chỉ chứa weights
-        self.tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-3.3B", use_fast=False)
+        # Ép dùng Tokenizer chậm (Slow Tokenizer) của NLLB để tránh lỗi của FastTokenizer trên Kaggle
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(
             model_name,
-            gguf_file="nllb-200-3.3B-f16.gguf", # Tên file GGUF chính xác trong repo
-            device_map="auto" # Tự động nhét lên GPU (cuda)
+            load_in_8bit=True,        # 8-bit quantization giảm một nửa VRAM (cần cài bitsandbytes)
+            device_map="auto"         # Tự động map vào GPU cho lượng VRAM còn lại
         )
         print("Model loaded successfully!")
 

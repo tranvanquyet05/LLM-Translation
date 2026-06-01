@@ -40,13 +40,21 @@ class GemmaTranslator:
         src_name = self._convert_lang_name(src_lang)
         tgt_name = self._convert_lang_name(tgt_lang)
         
+        # Prompt được tinh chỉnh tỉ mỉ dựa trên yêu cầu từ file log benchmark:
+        # Bắt buộc dịch chính xác, giữ nguyên số (digit_preservation), 
+        # HTML tags, format và dịch đúng ngôn ngữ đích mà không paraphrase bừa bãi.
         prompt = (
-            f"user\nYou are a professional {src_name} ({src_lang}) to {tgt_name} ({tgt_lang}) translator. "
-            f"Your goal is to accurately convey the meaning and nuances of the original {src_name} text "
-            f"while adhering to {tgt_name} grammar, vocabulary, and cultural sensitivities.\n"
-            f"Produce only the {tgt_name} translation, without any additional explanations or commentary. "
-            f"Please translate the following {src_name} text into {tgt_name}:\n\n\n"
-            f"{text}\nmodel\n"
+            f"<bos><start_of_turn>user\n"
+            f"You are a highly capable AI translation assistant focusing on enterprise-grade accuracy.\n"
+            f"Your task is to translate the following text from {src_name} ({src_lang}) to {tgt_name} ({tgt_lang}).\n"
+            f"CRITICAL REQUIREMENTS:\n"
+            f"1. Accurately convey the meaning and nuances of the original text.\n"
+            f"2. Preserve all numbers, dates, and currencies exactly as they appear.\n"
+            f"3. Preserve all original formatting, special characters, and HTML/XML structures completely intact.\n"
+            f"4. For mixed-language inputs (e.g., source contains some English words), translate the main language and keep the technical terms as appropriate.\n"
+            f"5. Produce ONLY the {tgt_name} translation. Do not add any conversational text, explanations, notes, or markdown formatting.\n\n"
+            f"Source text:\n{text}<end_of_turn>\n"
+            f"<start_of_turn>model\n"
         )
         return prompt
 
@@ -64,9 +72,10 @@ class GemmaTranslator:
                 outputs = self.model.generate(
                     **inputs,
                     max_new_tokens=1024,
-                    do_sample=False, # Use greedy decoding for translation
-                    temperature=0.0,
-                    top_p=1.0,
+                    do_sample=False,             # Beam cực ngặt để độ chính xác doanh nghiệp (deterministic)
+                    num_beams=3,                 # Dùng Beam Search = 3 để văn phong dịch mượt và đúng ngữ cảnh hơn
+                    repetition_penalty=1.1,      # Phạt lặp từ nhẹ để không bao giờ bị dính lỗi lặp "Tr Tr Tr..."
+                    early_stopping=True
                 )
                 
             # Extract the generated portion (after the prompt)

@@ -35,8 +35,9 @@ class NLLBTranslator:
                 **inputs,
                 forced_bos_token_id=forced_bos_token_id,
                 max_length=1024,
-                num_beams=1,           # Deterministic (không dùng beam search để chạy nhanh nhất)
-                do_sample=False        # Không mix sáng tạo
+                num_beams=4,                # Dùng Beam Search (nhìn xa 4 nhánh) để kết quả chất lượng và tự nhiên hơn
+                no_repeat_ngram_size=3,     # Cấm model lặp lại bất kỳ chuỗi 3 từ nào (chống kẹt vòng lặp)
+                early_stopping=True         # Dừng ngay khi dịch xong câu
             )
             
         translated_texts = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)

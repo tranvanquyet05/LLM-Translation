@@ -4,15 +4,15 @@ from bs4 import BeautifulSoup
 from src.lang_map import get_nllb_code
 
 class NLLBTranslator:
-    def __init__(self, model_name="Emilio407/nllb-200-3.3B-4bit", device="cuda"):
+    def __init__(self, model_name="facebook/nllb-200-3.3B", device="cuda"):
         print(f"Loading {model_name} on {device}...")
         self.device = device
-        # Ép dùng Tokenizer chậm (Slow Tokenizer) của NLLB để tránh lỗi của FastTokenizer trên Kaggle
-        # Tokenizer vẫn dùng từ facebook gốc vì bản 4bit thường chỉ nén weights
-        self.tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-3.3B", use_fast=False)
+        # Tận dụng T4x2: Chạy ở float16 để tối ưu tốc độ/VRAM và chia tải tự động qua 2 GPU (device_map="auto")
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(
             model_name,
-            device_map="auto"         # Tự động map vào GPU cho lượng VRAM còn lại (model repo này đã được nén 4-bit)
+            device_map="auto",
+            torch_dtype=torch.float16
         )
         print("Model loaded successfully!")
 

@@ -1,33 +1,63 @@
 import json
 import os
 
-input_file = r"C:\Users\tvquyet\Code\LLM_Translation\data\20260527-102649-misa-translategemma-4b-it.json.txt"
-output_file = r"C:\Users\tvquyet\Code\LLM_Translation\output\benchmark.json"
+INPUT_FILE = "/home/misa/Code/LLM-Translation/data/20260527-102649-misa-translategemma-4b-it.json.txt"
+OUTPUT_FILE = "/home/misa/Code/LLM-Translation/output/benchmark.json"
+
 
 def process_benchmark():
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    output_dir = os.path.dirname(OUTPUT_FILE)
 
-    with open(input_file, 'r', encoding='utf-8') as f:
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    with open(INPUT_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     extracted = []
-    # Kiểm tra xem list ở ngoài cùng hay trong object
+
+    # Trường hợp file là list
     if isinstance(data, list):
         for item in data:
-            if "results" in item:
-                for result in item["results"]:
-                    extracted.append({
-                        "id": result.get("id"),
-                        "source": result.get("source"),
-                        "translated": result.get("translated")
-                    })
-    else:
-        print("Định dạng file không giống như mong đợi.")
+            results = item.get("results", [])
+            for result in results:
+                extracted.append({
+                    "id": result.get("id"),
+                    "kind": result.get("kind"),
+                    "source_lang": result.get("source_lang"),
+                    "target_lang": result.get("target_lang"),
+                    "source": result.get("source"),
+                    "translated": result.get("translated"),
+                    "elapsed_ms": result.get("elapsed_ms"),
+                    "error": result.get("error")
+                })
 
-    with open(output_file, 'w', encoding='utf-8') as f:
+    # Trường hợp file là object chứa results
+    elif isinstance(data, dict):
+        results = data.get("results", [])
+
+        for result in results:
+            extracted.append({
+                "id": result.get("id"),
+                "kind": result.get("kind"),
+                "source_lang": result.get("source_lang"),
+                "target_lang": result.get("target_lang"),
+                "source": result.get("source"),
+                "translated": result.get("translated"),
+                "elapsed_ms": result.get("elapsed_ms"),
+                "error": result.get("error")
+            })
+
+    else:
+        print("❌ Định dạng JSON không được hỗ trợ.")
+        return
+
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(extracted, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ Đã trích xuất thành công {len(extracted)} items sang {output_file}")
+    print(f"✅ Đã trích xuất {len(extracted)} items")
+    print(f"📄 Output: {OUTPUT_FILE}")
+
 
 if __name__ == "__main__":
     process_benchmark()

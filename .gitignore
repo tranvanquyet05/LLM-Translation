@@ -2,3 +2,5 @@ data/
 *.ipynb
 output/
 .claude
+CLAUDE.md
+scripts/
